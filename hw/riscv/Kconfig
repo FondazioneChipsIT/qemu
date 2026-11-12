@@ -150,6 +150,16 @@ config TENSTORRENT
     select DS1338
     select TMP105
 
+config CHESHIRE
+    bool
+    default y
+    depends on RISCV64
+    select DEVICE_TREE
+    select HTIF
+    select RISCV_ACLINT
+    select SIFIVE_PLIC
+    select SERIAL_MM
+
 config XIANGSHAN_KUNMINGHU
     bool
     default y
