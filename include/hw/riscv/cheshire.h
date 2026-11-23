@@ -32,6 +32,9 @@ struct CheshireState {
     MemoryRegion axi_llc;
     uint32_t axi_llc_regs[0x5000 / 4];
     bool htif;
+    /* Optional memory backend holding the MAGIA CSR page (csr-memdev=) */
+    char *csr_memdev;
+    MemoryRegion csr;
 };
 
 enum {
@@ -54,6 +57,16 @@ enum {
 #define CHESHIRE_PLIC_NDEV          51
 #define CHESHIRE_PLIC_MAX_PRIORITY  7
 #define CHESHIRE_DRAM_DEFAULT_SIZE  0x04000000
+
+/*
+ * MAGIA control words written by the host (GVSoC magia_v4 UMA): page
+ * 0xCCFF_0000 of the csr-memdev backend, fetch enable at +0x400, entry
+ * point at +0x408 (pulp/chips/magia_v4/arch.py, CSR_PAGE_ADDR).
+ */
+#define CHESHIRE_CSR_PAGE_ADDR      0xCCFF0000
+#define CHESHIRE_CSR_PAGE_SIZE      0x1000
+#define CHESHIRE_CSR_WORDS_OFFSET   0x400
+#define CHESHIRE_CSR_WORDS_SIZE     0x10
 
 /* Standard SiFive PLIC register layout */
 #define CHESHIRE_PLIC_PRIORITY_BASE  0x00

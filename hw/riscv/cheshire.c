@@ -25,6 +25,13 @@
  * [0x80000000, 0xA0000000) is not mapped: accesses there raise an access
  * fault.
  *
+ * Optional MAGIA CSR page ("-M cheshire,csr-memdev=<memory backend id>"):
+ * the backend holds the host page 0xCCFF_0000 shared with GVSoC magia_v4
+ * (fetch enable word at +0x400, entry point at +0x408). If the RAM covers
+ * that page, only the words (0xCCFF_0400, 16 bytes) are mapped from the
+ * backend, over the RAM; if the RAM ends below the page, the whole page is
+ * mapped. The choice is logged at start.
+ *
  * Optional HTIF ("-M cheshire,htif=on"): tohost/fromhost are taken from the
  * ELF symbols of -bios/-kernel, as on "spike". It is not part of the DTS and
  * is meant for test termination (power-off / exit code). Its console, if
@@ -51,6 +58,7 @@
 #include "target/riscv/cpu.h"
 #include "chardev/char.h"
 #include "system/device_tree.h"
+#include "system/hostmem.h"
 #include "system/system.h"
 #include <libfdt.h>
 
@@ -271,6 +279,66 @@ static void create_fdt(CheshireState *s, const MemMapEntry *memmap)
     qemu_fdt_setprop_cell(fdt, uart_name, "reg-io-width", 4);
 }
 
+/* Maps the MAGIA CSR page from the csr-memdev backend (see the top comment) */
+static void cheshire_map_csr(CheshireState *s, MachineState *machine,
+                             MemoryRegion *system_memory)
+{
+    hwaddr ram_end = cheshire_memmap[CHESHIRE_DRAM].base + machine->ram_size;
+    HostMemoryBackend *backend;
+    MemoryRegion *backend_mr;
+    Object *obj;
+
+    obj = object_resolve_path_type(s->csr_memdev, TYPE_MEMORY_BACKEND, NULL);
+    if (!obj) {
+        error_report("csr-memdev: memory backend '%s' not found",
+                     s->csr_memdev);
+        exit(1);
+    }
+    backend = MEMORY_BACKEND(obj);
+    if (host_memory_backend_is_mapped(backend)) {
+        error_report("csr-memdev: memory backend '%s' is already in use",
+                     s->csr_memdev);
+        exit(1);
+    }
+    backend_mr = host_memory_backend_get_memory(backend);
+    if (memory_region_size(backend_mr) < CHESHIRE_CSR_PAGE_SIZE) {
+        error_report("csr-memdev: memory backend '%s' smaller than a page "
+                     "(0x%" PRIx64 " < 0x%x)", s->csr_memdev,
+                     (uint64_t)memory_region_size(backend_mr),
+                     CHESHIRE_CSR_PAGE_SIZE);
+        exit(1);
+    }
+    host_memory_backend_set_mapped(backend, true);
+
+    if (ram_end <= CHESHIRE_CSR_PAGE_ADDR) {
+        /* The RAM ends below the page: map it whole, nothing to cover */
+        memory_region_init_alias(&s->csr, OBJECT(machine), "cheshire.csr",
+                                 backend_mr, 0, CHESHIRE_CSR_PAGE_SIZE);
+        memory_region_add_subregion(system_memory, CHESHIRE_CSR_PAGE_ADDR,
+                                    &s->csr);
+        info_report("cheshire: csr-memdev '%s' mapped as the whole page "
+                    "0x%x-0x%x", s->csr_memdev, CHESHIRE_CSR_PAGE_ADDR,
+                    CHESHIRE_CSR_PAGE_ADDR + CHESHIRE_CSR_PAGE_SIZE - 1);
+    } else if (ram_end >= CHESHIRE_CSR_PAGE_ADDR + CHESHIRE_CSR_PAGE_SIZE) {
+        /* The RAM covers the page: map only the words, over the RAM */
+        memory_region_init_alias(&s->csr, OBJECT(machine), "cheshire.csr",
+                                 backend_mr, CHESHIRE_CSR_WORDS_OFFSET,
+                                 CHESHIRE_CSR_WORDS_SIZE);
+        memory_region_add_subregion_overlap(system_memory,
+            CHESHIRE_CSR_PAGE_ADDR + CHESHIRE_CSR_WORDS_OFFSET, &s->csr, 1);
+        info_report("cheshire: csr-memdev '%s' mapped as the words "
+                    "0x%x-0x%x over the RAM", s->csr_memdev,
+                    CHESHIRE_CSR_PAGE_ADDR + CHESHIRE_CSR_WORDS_OFFSET,
+                    CHESHIRE_CSR_PAGE_ADDR + CHESHIRE_CSR_WORDS_OFFSET +
+                    CHESHIRE_CSR_WORDS_SIZE - 1);
+    } else {
+        error_report("csr-memdev: the RAM ends inside the CSR page "
+                     "(0x%" HWADDR_PRIx "): it must end at or below 0x%x, or "
+                     "cover the page", ram_end, CHESHIRE_CSR_PAGE_ADDR);
+        exit(1);
+    }
+}
+
 static void cheshire_board_init(MachineState *machine)
 {
     const MemMapEntry *memmap = cheshire_memmap;
@@ -360,6 +428,11 @@ static void cheshire_board_init(MachineState *machine)
     memory_region_add_subregion(system_memory, memmap[CHESHIRE_DRAM].base,
                                 machine->ram);
 
+    /* MAGIA CSR page (optional) */
+    if (s->csr_memdev) {
+        cheshire_map_csr(s, machine, system_memory);
+    }
+
     /* Boot ROM (reset vector) */
     memory_region_init_rom(mask_rom, NULL, "riscv.cheshire.mrom",
                            memmap[CHESHIRE_MROM].size, &error_fatal);
@@ -426,6 +499,20 @@ static void cheshire_set_htif(Object *obj, bool value, Error **errp)
     CHESHIRE_MACHINE(obj)->htif = value;
 }
 
+static char *cheshire_get_csr_memdev(Object *obj, Error **errp)
+{
+    return g_strdup(CHESHIRE_MACHINE(obj)->csr_memdev);
+}
+
+static void cheshire_set_csr_memdev(Object *obj, const char *value,
+                                    Error **errp)
+{
+    CheshireState *s = CHESHIRE_MACHINE(obj);
+
+    g_free(s->csr_memdev);
+    s->csr_memdev = g_strdup(value);
+}
+
 static void cheshire_machine_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -442,6 +529,12 @@ static void cheshire_machine_class_init(ObjectClass *oc, const void *data)
     object_class_property_set_description(oc, "htif",
         "Enable HTIF at the tohost/fromhost ELF symbols (test power-off / "
         "exit code; console on the second serial port). Not in the DTS.");
+
+    object_class_property_add_str(oc, "csr-memdev", cheshire_get_csr_memdev,
+                                  cheshire_set_csr_memdev);
+    object_class_property_set_description(oc, "csr-memdev",
+        "Memory backend holding the MAGIA CSR page 0xCCFF0000 (fetch enable "
+        "at +0x400, entry at +0x408), shared with GVSoC. Not in the DTS.");
 }
 
 static const TypeInfo cheshire_machine_typeinfo = {
