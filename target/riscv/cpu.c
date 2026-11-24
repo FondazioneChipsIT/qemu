@@ -3923,6 +3923,22 @@ static const TypeInfo riscv_cpu_type_infos[] = {
         .misa_mxl_max = MXL_RV64,
         .misa_ext = RVE
     ),
+    
+    DEFINE_RISCV_CPU(TYPE_RISCV_CPU_CHESHIRE, TYPE_RISCV_VENDOR_CPU,
+        .misa_ext = RVI | RVM | RVA | RVF | RVD | RVC | RVB | RVS | RVU,
+        .misa_mxl_max = MXL_RV64,
+        .cfg.max_satp_mode = VM_1_10_SV39,
+        .priv_spec = PRIV_VERSION_1_12_0,
+        .cfg.pmp = false,
+        .cfg.mmu = false,
+        .cfg.ext_zifencei = true,
+        .cfg.ext_zicsr = true,
+        .cfg.ext_zbc = true,
+        .cfg.ext_zicond = true,
+        .cfg.ext_zcb = true,
+        .cfg.ext_zkn = true,
+        .cfg.ext_zicbom = true,
+    ),
 
     DEFINE_PROFILE_CPU(TYPE_RISCV_CPU_RVA22U64,  TYPE_RISCV_CPU_RV64I,  RVA22U64),
     DEFINE_PROFILE_CPU(TYPE_RISCV_CPU_RVA22S64,  TYPE_RISCV_CPU_RV64I,  RVA22S64),

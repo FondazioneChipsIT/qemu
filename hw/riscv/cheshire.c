@@ -62,6 +62,8 @@
 #include "system/system.h"
 #include <libfdt.h>
 
+// #define PRINT_CPU_NAME
+
 static const MemMapEntry cheshire_memmap[] = {
     [CHESHIRE_MROM]     = {     0x1000,      0xf000 },
     [CHESHIRE_UNMAPPED] = {    0x10000, 0x7fff0000 },
@@ -365,6 +367,9 @@ static void cheshire_board_init(MachineState *machine)
     /* Hart */
     object_initialize_child(OBJECT(machine), "soc", &s->soc,
                             TYPE_RISCV_HART_ARRAY);
+    #if defined(PRINT_CPU_NAME)
+    info_report("cheshire: cpu-type = %s", machine->cpu_type);
+    #endif
     object_property_set_str(OBJECT(&s->soc), "cpu-type", machine->cpu_type,
                             &error_abort);
     object_property_set_int(OBJECT(&s->soc), "hartid-base", 0, &error_abort);
@@ -520,7 +525,7 @@ static void cheshire_machine_class_init(ObjectClass *oc, const void *data)
     mc->desc = "RISC-V Cheshire board (PULP/ETH, as described by cheshire.dts)";
     mc->init = cheshire_board_init;
     mc->max_cpus = CHESHIRE_CPUS_MAX;
-    mc->default_cpu_type = TYPE_RISCV_CPU_BASE;
+    mc->default_cpu_type = TYPE_RISCV_CPU_CHESHIRE;
     mc->default_ram_size = CHESHIRE_DRAM_DEFAULT_SIZE;
     mc->default_ram_id = "riscv.cheshire.ram";
 
